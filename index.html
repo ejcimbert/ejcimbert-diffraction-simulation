@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diffraction d'une onde mécanique par une fente</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #121c2e;
+    --accent: #4da3ff;
+    --text: #e8eef7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  header {
+    padding: 14px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid #22314a;
+  }
+  header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+  header p { margin: 4px 0 0; font-size: 0.85rem; color: #9fb2cc; }
+  .layout {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+  }
+  .controls {
+    flex: 0 0 300px;
+    padding: 16px;
+    background: var(--panel);
+    border-right: 1px solid #22314a;
+  }
+  .stage { flex: 1; position: relative; min-width: 320px; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .ctrl { margin-bottom: 18px; }
+  .ctrl label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.9rem;
+    margin-bottom: 6px;
+  }
+  .ctrl label span.val {
+    color: var(--accent);
+    font-family: monospace;
+    font-weight: 600;
+  }
+  input[type=range] {
+    width: 100%;
+    accent-color: var(--accent);
+  }
+  .readout {
+    background: #0e1626;
+    border: 1px solid #22314a;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.85rem;
+    line-height: 1.6;
+  }
+  .readout b { color: var(--accent); }
+  .verdict {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  .verdict.ok { background: #12331d; border: 1px solid #1f6b3a; color: #b8f0c9; }
+  .verdict.warn { background: #33270f; border: 1px solid #6b5a1f; color: #f0e2b8; }
+  button {
+    width: 100%;
+    padding: 9px;
+    margin-top: 4px;
+    background: var(--accent);
+    color: #06101f;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { filter: brightness(1.1); }
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    margin-bottom: 10px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Diffraction d'une onde mécanique par une fente de largeur a</h1>
+  <p>Principe de Huygens : chaque point de la fente devient une source secondaire. Ajustez a et λ avec les curseurs.</p>
+</header>
+
+<div class="layout">
+  <aside class="controls">
+    <div class="ctrl">
+      <label>Largeur de la fente a <span class="val" id="valA">1,0 λ</span></label>
+      <input type="range" id="sliderA" min="5" max="120" step="1" value="20">
+    </div>
+    <div class="ctrl">
+      <label>Longueur d'onde λ <span class="val" id="valL">20 px</span></label>
+      <input type="range" id="sliderL" min="8" max="45" step="1" value="20">
+    </div>
+    <div class="ctrl">
+      <label>Vitesse de l'animation <span class="val" id="valS">1,0×</span></label>
+      <input type="range" id="sliderSpeed" min="0" max="3" step="0.1" value="1">
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="chkProfile" checked>
+      <label for="chkProfile">Afficher le profil d'intensité diffractée</label>
+    </div>
+    <button id="btnPause">Pause / Lecture</button>
+
+    <div class="readout" id="readout"></div>
+    <div class="verdict ok" id="verdict"></div>
+  </aside>
+
+  <div class="stage">
+    <canvas id="cv"></canvas>
+  </div>
+</div>
+
+<script>
+(function () {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const sliderA = document.getElementById('sliderA');
+  const sliderL = document.getElementById('sliderL');
+  const sliderSpeed = document.getElementById('sliderSpeed');
+  const chkProfile = document.getElementById('chkProfile');
+  const btnPause = document.getElementById('btnPause');
+  const valA = document.getElementById('valA');
+  const valL = document.getElementById('valL');
+  const valS = document.getElementById('valS');
+  const readout = document.getElementById('readout');
+  const verdict = document.getElementById('verdict');
+
+  let W = 0, H = 0, dpr = 1;
+  let paused = false;
+  let t = 0;
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    const rect = cv.parentElement.getBoundingClientRect();
+    W = Math.max(320, rect.width);
+    H = Math.max(400, rect.height);
+    cv.width = W * dpr;
+    cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+
+  function params() {
+    return {
+      a: +sliderA.value,      // largeur fente en px
+      lambda: +sliderL.value, // longueur d'onde en px
+      speed: +sliderSpeed.value
+    };
+  }
+
+  // Intensité théorique (fente rectangulaire) : I(θ) = sinc²(π a sinθ / λ)
+  function intensity(theta, a, lambda) {
+    const x = Math.PI * a * Math.sin(theta) / lambda;
+    if (Math.abs(x) < 1e-9) return 1;
+    const s = Math.sin(x) / x;
+    return s * s;
+  }
+
+  function draw() {
+    const p = params();
+    const barrierX = W * 0.28;
+    const cy = H / 2;
+    const a = p.a;
+    const lambda = p.lambda;
+
+    ctx.fillStyle = '#08101c';
+    ctx.fillRect(0, 0, W, H);
+
+    // ---- Onde incidente (à gauche de la fente) : trains d'ondes plans
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, barrierX, H);
+    ctx.clip();
+    const k = 2 * Math.PI / lambda;
+    const img = ctx.createImageData ? null : null;
+    // draw incident waves as vertical lines with brightness ~ cos phase
+    const stepX = 2;
+    for (let x = 0; x < barrierX; x += stepX) {
+      const phase = k * (barrierX - x) - 2 * Math.PI * t;
+      const v = 0.5 + 0.5 * Math.cos(phase);
+      const alpha = 0.15 + 0.55 * v;
+      ctx.strokeStyle = 'rgba(77,163,255,' + alpha.toFixed(3) + ')';
+      ctx.lineWidth = stepX;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // ---- Barrière avec fente
+    const barW = 8;
+    ctx.fillStyle = '#3a4a63';
+    ctx.fillRect(barrierX - barW / 2, 0, barW, cy - a / 2);
+    ctx.fillRect(barrierX - barW / 2, cy + a / 2, barW, H - (cy + a / 2));
+    ctx.strokeStyle = '#5c729a';
+    ctx.strokeRect(barrierX - barW / 2, 0, barW, cy - a / 2);
+    ctx.strokeRect(barrierX - barW / 2, cy + a / 2, barW, H - (cy + a / 2));
+
+    // Cotes de la fente
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(barrierX + 16, cy - a / 2);
+    ctx.lineTo(barrierX + 16, cy + a / 2);
+    ctx.moveTo(barrierX + 12, cy - a / 2);
+    ctx.lineTo(barrierX + 20, cy - a / 2);
+    ctx.moveTo(barrierX + 12, cy + a / 2);
+    ctx.lineTo(barrierX + 20, cy + a / 2);
+    ctx.stroke();
+    ctx.fillStyle = '#ffd166';
+    ctx.font = '12px monospace';
+    ctx.fillText('a', barrierX + 24, cy + 4);
+
+    // ---- Zone diffractée : superposition d'ondelettes de Huygens
+    // Sources réparties dans la fente
+    const nSrc = Math.max(2, Math.min(24, Math.round(a / 4)));
+    const sources = [];
+    for (let i = 0; i < nSrc; i++) {
+      sources.push(cy - a / 2 + (a * (i + 0.5)) / nSrc);
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(barrierX, 0, W - barrierX, H);
+    ctx.clip();
+
+    const imgData = ctx.getImageData(barrierX, 0, W - barrierX, H);
+    const d = imgData.data;
+    const iw = imgData.width;
+    const omega = 2 * Math.PI * t;
+    const inv = 1 / sources.length;
+
+    for (let py = 0; py < imgData.height; py++) {
+      const y = py;
+      for (let px = 0; px < iw; px++) {
+        const x = barrierX + px;
+        const dx0 = x - barrierX;
+        let sumRe = 0, sumIm = 0;
+        for (let s = 0; s < sources.length; s++) {
+          const dy = y - sources[s];
+          const r = Math.sqrt(dx0 * dx0 + dy * dy);
+          const phase = k * r - omega;
+          const amp = inv / (1 + r * 0.006);
+          sumRe += amp * Math.cos(phase);
+          sumIm += amp * Math.sin(phase);
+        }
+        const v = Math.sqrt(sumRe * sumRe + sumIm * sumIm); // amplitude locale
+        const wave = 0.5 + 0.5 * (sumRe / (v + 1e-9)); // aspect "crêtes"
+        const bright = Math.min(1, v * 1.6);
+        const idx = (py * iw + px) * 4;
+        const r8 = (20 + 90 * wave * bright) | 0;
+        const g8 = (40 + 160 * wave * bright) | 0;
+        const b8 = (80 + 175 * wave * bright) | 0;
+        d[idx] = r8; d[idx + 1] = g8; d[idx + 2] = b8; d[idx + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, barrierX, 0);
+
+    // Sources secondaires (points de Huygens)
+    for (const sy of sources) {
+      ctx.fillStyle = 'rgba(255,209,102,0.9)';
+      ctx.beginPath();
+      ctx.arc(barrierX, sy, 1.8, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+
+    // ---- Profil d'intensité théorique (courbe I(θ))
+    if (chkProfile.checked) {
+      const x0 = barrierX + 10;
+      const scale = 110; // px d'ouverture angulaire -> position sur écran
+      ctx.strokeStyle = 'rgba(255,110,130,0.95)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      let started = false;
+      for (let y = 0; y <= H; y += 2) {
+        const theta = Math.atan2(y - cy, scale);
+        const I = intensity(theta, a, lambda);
+        const px2 = x0 + I * Math.min(160, (W - barrierX) * 0.35);
+        if (!started) { ctx.moveTo(px2, y); started = true; }
+        else ctx.lineTo(px2, y);
+      }
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,110,130,0.95)';
+      ctx.font = '11px monospace';
+      ctx.fillText('I(θ) ∝ sinc²(π·a·sinθ/λ)', x0 + 4, 16);
+    }
+
+    ctx.restore();
+
+    // Flèche direction de propagation
+    ctx.strokeStyle = 'rgba(200,220,255,0.55)';
+    ctx.lineWidth = 1.5;
+    const ax = barrierX / 2, ay = 26;
+    ctx.beginPath();
+    ctx.moveTo(ax - 30, ay); ctx.lineTo(ax + 26, ay);
+    ctx.moveTo(ax + 26, ay); ctx.lineTo(ax + 18, ay - 4);
+    ctx.moveTo(ax + 26, ay); ctx.lineTo(ax + 18, ay + 4);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(200,220,255,0.75)';
+    ctx.font = '11px monospace';
+    ctx.fillText('onde incidente', ax - 34, ay - 8);
+  }
+
+  function updateLabels() {
+    const p = params();
+    valA.textContent = (p.a / p.lambda).toFixed(2).replace('.', ',') + ' λ';
+    valL.textContent = p.lambda + ' px';
+    valS.textContent = p.speed.toFixed(1).replace('.', ',') + '×';
+
+    const ratio = p.a / p.lambda;
+    const theta = Math.atan2(1, Math.max(1, ratio)); // ~λ/a
+    const thetaDeg = (Math.atan(p.lambda / p.a) * 180 / Math.PI);
+
+    readout.innerHTML =
+      'a / λ = <b>' + ratio.toFixed(2).replace('.', ',') + '</b><br>' +
+      'Étalement angulaire θ ≈ λ/a = <b>' + thetaDeg.toFixed(1).replace('.', ',') + '°</b><br>' +
+      'λ est <b>inchangée</b> après la fente.';
+
+    if (ratio <= 1.5) {
+      verdict.className = 'verdict ok';
+      verdict.innerHTML = '<b>Diffraction marquée</b> : a ≲ λ. L\'onde se propage dans toutes les directions derrière la fente, comme si elle venait d\'une source ponctuelle.';
+    } else if (ratio <= 5) {
+      verdict.className = 'verdict warn';
+      verdict.innerHTML = '<b>Diffraction partielle</b> : a ~ quelques λ. L\'onde s\'élargit d\'un angle θ ≈ λ/a mais reste principalement vers l\'avant.';
+    } else {
+      verdict.className = 'verdict warn';
+      verdict.innerHTML = '<b>Pas de diffraction notable</b> : a ≫ λ. L\'onde passe dans le prolongement géométrique de la fente (propagation rectiligne).';
+    }
+  }
+
+  function loop() {
+    if (!paused) {
+      const p = params();
+      t += 0.02 * p.speed;
+    }
+    draw();
+    updateLabels();
+    requestAnimationFrame(loop);
+  }
+
+  btnPause.addEventListener('click', () => { paused = !paused; });
+  [sliderA, sliderL, sliderSpeed].forEach(s => s.addEventListener('input', updateLabels));
+
+  resize();
+  loop();
+})();
+</script>
+</body>
+</html>
