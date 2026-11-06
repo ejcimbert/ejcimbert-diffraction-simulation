@@ -246,16 +246,20 @@
     ctx.rect(barrierX, 0, W - barrierX, H);
     ctx.clip();
 
-    const imgData = ctx.getImageData(barrierX, 0, W - barrierX, H);
+    // getImageData/putImageData travaillent en pixels physiques (ignorant le
+    // transform dpr) : sur ecrans haute densite (telephones, dpr 2-3), il faut
+    // donc lire/ecrire la zone en pixels physiques sous peine de desalignement.
+    const rs = Math.min(dpr, 2);
+    const imgData = ctx.getImageData(barrierX * rs, 0, (W - barrierX) * rs, H * rs);
     const d = imgData.data;
     const iw = imgData.width;
     const omega = 2 * Math.PI * t;
     const inv = 1 / sources.length;
 
     for (let py = 0; py < imgData.height; py++) {
-      const y = py;
+      const y = py / rs;
       for (let px = 0; px < iw; px++) {
-        const x = barrierX + px;
+        const x = barrierX + px / rs;
         const dx0 = x - barrierX;
         let sumRe = 0, sumIm = 0;
         for (let s = 0; s < sources.length; s++) {
@@ -276,7 +280,7 @@
         d[idx] = r8; d[idx + 1] = g8; d[idx + 2] = b8; d[idx + 3] = 255;
       }
     }
-    ctx.putImageData(imgData, barrierX, 0);
+    ctx.putImageData(imgData, barrierX * rs, 0);
 
     // Sources secondaires (points de Huygens)
     for (const sy of sources) {
